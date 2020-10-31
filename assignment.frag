@@ -91,7 +91,7 @@ const vec3 DIFFUSE = vec3(0.7, 0.7, 0.3);
 const vec3 SPECULAR = vec3(0.7, 0.6, 0.7);
 const float DIFFUSE_INTENSITY = 0.1;
 const float SPECULAR_INTENSITY = 0.2;
-const float SHININESS = 40.0;
+const float SHININESS = 0.2;
 
 
 struct material
@@ -377,17 +377,23 @@ vec3 render(vec3 o, vec3 v)
     // Compute intersection point along the view ray.
     intersect(o, v, MAX_DIST, p, n, mat, false);
 
-    // Add some lighting code here!    
-    // Phong lighting
-    vec3 diffuse = DIFFUSE * DIFFUSE_INTENSITY * max(dot(lamp_pos-p,n),0.0);
+    // Add some lighting code here! 
 
-    mat.color.rgb = AMBIENT_STRENGTH * mat.color.rgb + diffuse;
+    // Phong lighting
+    // TODO: Light direction should be opposite ???    
+    vec3 light_dir = normalize(lamp_pos - p);
+    v = normalize(v);
+    vec3 diffuse = DIFFUSE * DIFFUSE_INTENSITY * max(dot(light_dir, n), 0.0);
+    vec3 reflect_ld = 2.0 * dot(-light_dir, n) * n + light_dir;
+    vec3 specular = SPECULAR_INTENSITY * SPECULAR * pow(max(dot(reflect_ld, v), 0.0), SHININESS);
+
+    mat.color.rgb = AMBIENT_STRENGTH * mat.color.rgb + diffuse + specular;
 
     return mat.color.rgb;
 }
 
 void main()
-{
+{    
     // This is the position of the pixel in normalized device coordinates.
     vec2 uv = (gl_FragCoord.xy/u_resolution)*2.0-1.0;
     // Calculate aspect ratio
@@ -401,5 +407,22 @@ void main()
     // Direction of the view ray
     //vec3 v = vec3(0,0,1);
     vec3 v = vec3(uv.x, uv.y, 0) - o;
+
+    // Camera movement
+    // vec3 camera_pos = o;
+    // TODO: Possibly have to change to +o, as then camera points towards
+    // positive z-axis
+    // vec3 camera_dir = normalize(-o);
+    // vec3 camera_up = normalize(cross(o, vec3(0.0, 1.0, -1.0)));
+    // vec3 camera_right = normalize(cross(camera_dir, camera_up));
+    // camera_up = cross(camera_right, camera_dir);
+    
+    float norm_mouse_x = -1.0 + 2.0 * u_mouse.x / u_resolution.x;
+    float norm_mouse_y = -1.0 + 2.0 * u_mouse.y / u_resolution.y;
+    v = rot_y(v, norm_mouse_x);
+    v = rot_x(v, norm_mouse_y);
+    //v = rot_z(v, u_mouse.y/u_resolution.x);
+    
+
     gl_FragColor = vec4(render(o, v), 1.0);
 }
