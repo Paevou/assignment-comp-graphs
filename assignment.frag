@@ -82,6 +82,18 @@ uniform vec2 u_mouse;
 // Time since startup, in seconds
 uniform float u_time;
 
+// Values are approximated with exercise 5 values
+// Ambient constant
+const float AMBIENT_STRENGTH = 0.6;
+// Diffuse constant
+const vec3 DIFFUSE = vec3(0.7, 0.7, 0.3);
+// Specular constant
+const vec3 SPECULAR = vec3(0.7, 0.6, 0.7);
+const float DIFFUSE_INTENSITY = 0.1;
+const float SPECULAR_INTENSITY = 0.2;
+const float SHININESS = 40.0;
+
+
 struct material
 {
     // The color of the surface
@@ -365,7 +377,11 @@ vec3 render(vec3 o, vec3 v)
     // Compute intersection point along the view ray.
     intersect(o, v, MAX_DIST, p, n, mat, false);
 
-    // Add some lighting code here!
+    // Add some lighting code here!    
+    // Phong lighting
+    vec3 diffuse = DIFFUSE * DIFFUSE_INTENSITY * max(dot(lamp_pos-p,n),0.0);
+
+    mat.color.rgb = AMBIENT_STRENGTH * mat.color.rgb + diffuse;
 
     return mat.color.rgb;
 }
@@ -378,6 +394,7 @@ void main()
     float aspect = u_resolution.x/u_resolution.y;
 
     // Modify these two to create perspective projection!
+    //TODO: Why do parts of the blod dissappear
     // Origin of the view ray       
     //vec3 o = vec3(2.96*vec2(uv.x * aspect, uv.y), -2.0);
     vec3 o = vec3(0,0,-1.0);
