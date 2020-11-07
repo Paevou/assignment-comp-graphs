@@ -93,6 +93,7 @@ const float DIFFUSE_INTENSITY = 0.1;
 const float SPECULAR_INTENSITY = 0.2;
 const float SHININESS = 0.2;
 
+float sharp_shadow(vec3 object_point, vec3 light_dir, vec3 light_point);
 
 struct material
 {
@@ -389,7 +390,29 @@ vec3 render(vec3 o, vec3 v)
 
     mat.color.rgb = AMBIENT_STRENGTH * mat.color.rgb + diffuse + specular;
 
+    // Sharp shadow
+    // Come out of the surface
+    p += 0.01*n;
+    float sharp_shadow_term = sharp_shadow(p, light_dir, lamp_pos);
+    mat.color.rgb *= sharp_shadow_term;
+
     return mat.color.rgb;
+}
+
+float sharp_shadow(vec3 object_point, vec3 light_dir, vec3 light_point) {
+    vec3 p, n;
+    material mat;
+
+    float dist = sqrt( (pow(object_point.x,2.0) - pow(light_point.x,2.0)) 
+        + (pow(object_point.y,2.0) - pow(light_point.x,2.0)) 
+        + (pow(object_point.z,2.0) - pow(light_point.x,2.0)) ) - 1.0;
+    bool intersect = intersect(object_point, light_dir, dist, p, n, mat, false);
+    
+    if( p != light_point && intersect) {
+        return 0.5;
+    } else {
+        return 1.0;
+    }    
 }
 
 void main()
@@ -417,10 +440,13 @@ void main()
     // vec3 camera_right = normalize(cross(camera_dir, camera_up));
     // camera_up = cross(camera_right, camera_dir);
     
-    float norm_mouse_x = -1.0 + 2.0 * u_mouse.x / u_resolution.x;
-    float norm_mouse_y = -1.0 + 2.0 * u_mouse.y / u_resolution.y;
-    v = rot_y(v, norm_mouse_x);
-    v = rot_x(v, norm_mouse_y);
+    // TODO: Ask about wheter camera movement is in fragment shader or the
+    // vertex shader
+    // float norm_mouse_x = -1.0 + 2.0 * u_mouse.x / u_resolution.x;
+    // float norm_mouse_y = -1.0 + 2.0 * u_mouse.y / u_resolution.y;
+    // v = rot_y(v, norm_mouse_x);
+    // v = rot_x(v, -norm_mouse_y);
+    // o = vec3(1.0*sin(u_time), 1.0*cos(u_time),1.0*sin(u_time));
     //v = rot_z(v, u_mouse.y/u_resolution.x);
     
 
