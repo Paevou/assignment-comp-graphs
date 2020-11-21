@@ -41,6 +41,13 @@
 precision mediump float;
 #endif
 
+
+// Defines for functionalities that cannot be on at the same time
+#define SHARP_SHADOW true
+#define SOFT_SHADOW true
+
+
+
 #define PI 3.14159265359
 #define EPSILON 0.00001
 
@@ -93,7 +100,14 @@ const float DIFFUSE_INTENSITY = 0.1;
 const float SPECULAR_INTENSITY = 0.2;
 const float SHININESS = 0.2;
 
-float sharp_shadow(vec3 object_point, vec3 light_dir, vec3 light_point);
+const float light_bulb_radius = 0.5;
+const vec3 lamp_pos = vec3(0.0, 2.1, 3.0);
+
+float sharp_shadow(vec3 object_point, vec3 normal, vec3 light_dir, vec3 light_point);
+float soft_shadow(vec3 object_point,  vec3 normal, vec3 light_dir, vec3 light_point);
+vec3 getConeSample(vec3 direction, float coneAngle, vec3 perpendicular, in vec2 in_seed, out vec2 out_seed);
+float rand(vec2 seed);
+mat3 angleAxis3x3(float angle, vec3 axis);
 
 struct material
 {
@@ -245,6 +259,18 @@ material crate_material(vec3 p)
     return mat;
 }
 
+float light_distance(vec3 p)
+{
+    return length(p - lamp_pos) - light_bulb_radius;
+}
+
+material light_material(vec3 p)
+{
+    material mat;
+    mat.color = vec4(0.851, 1.0, 0.0, 1.0);
+    return mat;
+}
+
 /* The distance function collecting all others.
  *
  * Parameters:
@@ -286,6 +312,12 @@ float map(
     }
 
     // Add your own objects here!
+
+    dist = light_distance(p);
+    if(dist < min_dist) {
+        mat = light_material(p);
+        min_dist = dist;
+    }
 
     return min_dist;
 }
@@ -370,7 +402,6 @@ bool intersect(
 vec3 render(vec3 o, vec3 v)
 {
     // This lamp is positioned at the hole in the roof.
-    vec3 lamp_pos = vec3(0.0, 3.1, 3.0);
 
     vec3 p, n;
     material mat;
@@ -389,30 +420,150 @@ vec3 render(vec3 o, vec3 v)
     vec3 specular = SPECULAR_INTENSITY * SPECULAR * pow(max(dot(reflect_ld, v), 0.0), SHININESS);
 
     mat.color.rgb = AMBIENT_STRENGTH * mat.color.rgb + diffuse + specular;
-
-    // Sharp shadow
     // Come out of the surface
     p += 0.01*n;
-    float sharp_shadow_term = sharp_shadow(p, light_dir, lamp_pos);
-    mat.color.rgb *= sharp_shadow_term;
+    if( SHARP_SHADOW ) {
+        // Sharp shadow        
+        float sharp_shadow_term = sharp_shadow(p, n, light_dir, lamp_pos);
+        mat.color.rgb *= sharp_shadow_term;
+    } else if (SOFT_SHADOW) {
+        // Soft shadow 
+        float sharp_shadow_term = sharp_shadow(p, n, light_dir, lamp_pos);
+        if( sharp_shadow_term == 1.0) {
+            mat.color.rgb *= sharp_shadow_term;
+        } else {
+            mat.color.rgb *= soft_shadow(p, n, light_dir, lamp_pos); 
+        }    
+        
+    }
 
     return mat.color.rgb;
 }
 
-float sharp_shadow(vec3 object_point, vec3 light_dir, vec3 light_point) {
+float sharp_shadow(vec3 object_point, vec3 normal, vec3 light_dir, vec3 light_point) {
     vec3 p, n;
     material mat;
 
-    float dist = sqrt( (pow(object_point.x,2.0) - pow(light_point.x,2.0)) 
-        + (pow(object_point.y,2.0) - pow(light_point.x,2.0)) 
-        + (pow(object_point.z,2.0) - pow(light_point.x,2.0)) ) - 1.0;
+    float dist = sqrt( pow(object_point.x - light_point.x,2.0) 
+        + pow(object_point.y - light_point.y,2.0) 
+        + pow(object_point.z - light_point.z,2.0));
+    object_point += 0.01*normal;
     bool intersect = intersect(object_point, light_dir, dist, p, n, mat, false);
     
-    if( p != light_point && intersect) {
+    //if( p != light_point && intersect) {
+    if( mat != light_material(vec3(0.0))) {
         return 0.5;
     } else {
         return 1.0;
     }    
+}
+
+float soft_shadow(vec3 object_point, vec3 normal, vec3 light_dir, vec3 light_point) {
+    // Source which was used as a base for soft shadows
+    //https://medium.com/@alexander.wester/ray-tracing-soft-shadows-in-real-time-a53b836d123b
+    
+    vec3 perpendicular = cross(light_dir, vec3(0.0,1.0,0.0));
+
+    if(perpendicular.x == 0.0
+        && perpendicular.y == 0.0
+        && perpendicular.z == 0.0) {
+        perpendicular = vec3(1.0,0.0,0.0);
+    }
+
+    // Vector to the edge of the light bulb
+    vec3 vec_light_edge = normalize((light_point + perpendicular * light_bulb_radius) - object_point);
+    // * 2 so we get both halves of the circle plane
+    float cone_angle = acos(dot(light_dir, vec_light_edge)) * 2.0;
+
+    const int num_of_rays = 2;
+    int num_of_hits = 0;
+    object_point += 0.01*normal;    
+    vec2 in_seed = gl_FragCoord.xy/u_resolution.xy;
+    vec2 out_seed;
+    for(int i = 0; i < num_of_rays; i++ ) {
+        vec3 p, n;
+        material mat;
+        float dist = sqrt( pow(object_point.x - light_point.x,2.0) 
+        + pow(object_point.y - light_point.y,2.0) 
+        + pow(object_point.z - light_point.z,2.0));
+        
+        int seed = 10;
+        //vec3 t = getConeSample(seed, -light_dir, cone_angle);         
+        vec3 t = getConeSample(light_dir, cone_angle, perpendicular, in_seed, out_seed);
+        in_seed = out_seed;
+        vec3 ray_dir = light_dir * dist + t;
+
+        bool hit = intersect(object_point, ray_dir, dist, p, n, mat, false);
+        if(mat == light_material(vec3(0.0))) {
+            num_of_hits += 1;
+        }        
+    }     
+    return float(num_of_hits)/float(num_of_rays);
+}
+
+vec3 getConeSample(vec3 direction, float coneAngle, vec3 perpendicular, in vec2 in_seed, out vec2 out_seed) {
+    // Source for the base for random direction vector to a circle plane
+    // https://medium.com/@alexander.wester/ray-tracing-soft-shadows-in-real-time-a53b836d123b
+    float cosAngle = cos(coneAngle);
+
+    // float z = rand(vec2(u_time, u_time*2.0)) * (1.0 - cosAngle) + cosAngle;
+    // float phi = rand(vec2(u_time*2.0, u_time*3.0)) * 2.0 * PI;
+    // float z = rand(seed) * (1.0 - cosAngle) + cosAngle;
+    // float phi = rand(seed) * 2.0 * PI;
+
+    // float x = sqrt(1.0 - z * z) * cos(phi);
+    // float y = sqrt(1.0 - z * z) * sin(phi);
+    // vec3 north = vec3(0.0, 0.0, 1.0);
+
+    // vec3 axis = normalize(cross(north, normalize(direction)));
+    // float angle = acos(dot(normalize(direction), north));    
+
+    // Rotation around the direction to the light source center
+    float rot_angle = sin(rand(in_seed))*2.0*PI;
+    float r = sin(rand(in_seed)) ;
+    out_seed = vec2(r, 2.0*r);
+    mat3 R = angleAxis3x3(rot_angle, direction);
+    perpendicular *= r;
+    //perpendicular = perpendicular * 0.1;
+
+    vec3 ret = vec3(0.0);
+    // vec3 v = vec3(x,y,z);
+    // perpendicular = direction;
+    ret.x = R[0].x * perpendicular.x + R[1].x * perpendicular.y + R[2].x * perpendicular.z;
+    ret.y = R[0].y * perpendicular.x + R[1].y * perpendicular.y + R[2].y * perpendicular.z;
+    ret.z = R[0].z * perpendicular.x + R[1].z * perpendicular.y + R[2].z * perpendicular.z;
+    
+    // ret.x = R[0].x * v.x + R[1].x * v.y + R[2].x * v.z;
+    // ret.y = R[0].y * v.x + R[1].y * v.y + R[2].y * v.z;
+    // ret.z = R[0].z * v.x + R[1].z * v.y + R[2].z * v.z;
+    // return direction;
+    return ret;
+}
+
+float rand(vec2 seed){
+    // 'Random' function 
+    return fract(sin(dot(seed.xy,
+                         vec2(12.9898,78.233)))*
+        43758.5453123);
+}
+
+mat3 angleAxis3x3(float angle, vec3 axis) {
+    // Rotation matrix 
+    // Source https://gist.github.com/Piratkopia13/46c5dda51ed59cfe69b242deb0cf40ce
+    float c, s;
+    c = cos(angle);
+    s = sin(angle);
+
+    float t = 1.0 - c;
+    float x = axis.x;
+    float y = axis.y;
+    float z = axis.z;
+
+    return mat3(
+        t * x * x + c,      t * x * y - s * z,  t * x * z + s * y,
+        t * x * y + s * z,  t * y * y + c,      t * y * z - s * x,
+        t * x * z - s * y,  t * y * z + s * x,  t * z * z + c
+    );
 }
 
 void main()
@@ -426,7 +577,7 @@ void main()
     //TODO: Why do parts of the blod dissappear
     // Origin of the view ray       
     //vec3 o = vec3(2.96*vec2(uv.x * aspect, uv.y), -2.0);
-    vec3 o = vec3(0,0,-1.0);
+    vec3 o = vec3(0,0,-0.8);
     // Direction of the view ray
     //vec3 v = vec3(0,0,1);
     vec3 v = vec3(uv.x, uv.y, 0) - o;
@@ -449,6 +600,5 @@ void main()
     // o = vec3(1.0*sin(u_time), 1.0*cos(u_time),1.0*sin(u_time));
     //v = rot_z(v, u_mouse.y/u_resolution.x);
     
-
     gl_FragColor = vec4(render(o, v), 1.0);
 }
