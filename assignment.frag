@@ -119,6 +119,7 @@ struct material
     // The color of the surface
     vec4 color;
     // You can add your own material features here!
+    float reflection_term;
 };
 
 // Good resource for finding more building blocks for distance functions:
@@ -213,6 +214,7 @@ float blob_distance(vec3 p)
 material blob_material(vec3 p)
 {
     material mat;
+    mat.reflection_term = 0.01;
     mat.color = vec4(1.0, 0.5, 0.3, 0.0);
     return mat;
 }
@@ -225,6 +227,7 @@ float sphere_distance(vec3 p)
 material sphere_material(vec3 p)
 {
     material mat;
+    mat.reflection_term = 0.2;
     mat.color = vec4(0.1, 0.2, 0.0, 1.0);
     return mat;
 }
@@ -240,6 +243,7 @@ float room_distance(vec3 p)
 material room_material(vec3 p)
 {
     material mat;
+    mat.reflection_term = 0.1;
     mat.color = vec4(1.0, 1.0, 1.0, 1.0);
     if(p.x <= -2.98) mat.color.rgb = vec3(1.0, 0.0, 0.0);
     else if(p.x >= 2.98) mat.color.rgb = vec3(0.0, 1.0, 0.0);
@@ -255,7 +259,7 @@ material crate_material(vec3 p)
 {
     material mat;
     mat.color = vec4(1.0, 1.0, 1.0, 1.0);
-
+    mat.reflection_term = 0.7;
     vec3 q = rot_y(p-vec3(-1,-1,5), u_time) * 0.98;
     if(fract(q.x + floor(q.y*2.0) * 0.5 + floor(q.z*2.0) * 0.5) < 0.5)
     {
@@ -272,6 +276,7 @@ float light_distance(vec3 p)
 material light_material(vec3 p)
 {
     material mat;
+    mat.reflection_term = 0.0;
     mat.color = vec4(0.851, 1.0, 0.0, 1.0);
     return mat;
 }
@@ -444,7 +449,7 @@ vec3 render(vec3 o, vec3 v)
     
     vec3 reflect_dir = reflect(v, n);
     vec3 reflect_color = sharp_reflection(p,reflect_dir);
-    mat.color.rgb += reflect_color/12.0;
+    mat.color.rgb += reflect_color * mat.reflection_term;
 
     return mat.color.rgb;
 }
