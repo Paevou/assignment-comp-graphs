@@ -46,6 +46,8 @@ precision mediump float;
 #define SHARP_SHADOW true
 #define SOFT_SHADOW true
 
+#define SHARP_REFLECTION true
+
 
 
 #define PI 3.14159265359
@@ -108,6 +110,9 @@ float soft_shadow(vec3 object_point,  vec3 normal, vec3 light_dir, vec3 light_po
 vec3 getConeSample(vec3 direction, float coneAngle, vec3 perpendicular, in vec2 in_seed, out vec2 out_seed);
 float rand(vec2 seed);
 mat3 angleAxis3x3(float angle, vec3 axis);
+
+vec3 render_reflect(vec3 o, vec3 v);
+vec3 sharp_reflection(vec3 object_point, vec3 reflect_dir);
 
 struct material
 {
@@ -436,6 +441,10 @@ vec3 render(vec3 o, vec3 v)
         }    
         
     }
+    
+    vec3 reflect_dir = reflect(v, n);
+    vec3 reflect_color = sharp_reflection(p,reflect_dir);
+    mat.color.rgb += reflect_color/12.0;
 
     return mat.color.rgb;
 }
@@ -564,6 +573,56 @@ mat3 angleAxis3x3(float angle, vec3 axis) {
         t * x * y + s * z,  t * y * y + c,      t * y * z - s * x,
         t * x * z - s * y,  t * y * z + s * x,  t * z * z + c
     );
+}
+
+vec3 render_reflect(vec3 o, vec3 v)
+{
+    vec3 p, n;
+    material mat;
+
+    // Compute intersection point along the view ray.
+    intersect(o, v, MAX_DIST, p, n, mat, false);
+
+    // Add some lighting code here! 
+
+    // Phong lighting
+    // TODO: Light direction should be opposite ???    
+    vec3 light_dir = normalize(lamp_pos - p);
+    v = normalize(v);
+    vec3 diffuse = DIFFUSE * DIFFUSE_INTENSITY * max(dot(light_dir, n), 0.0);
+    vec3 reflect_ld = 2.0 * dot(-light_dir, n) * n + light_dir;
+    vec3 specular = SPECULAR_INTENSITY * SPECULAR * pow(max(dot(reflect_ld, v), 0.0), SHININESS);
+
+    mat.color.rgb = AMBIENT_STRENGTH * mat.color.rgb + diffuse + specular;
+    // Come out of the surface
+    p += 0.01*n;
+    if( SHARP_SHADOW ) {
+        // Sharp shadow        
+        float sharp_shadow_term = sharp_shadow(p, n, light_dir, lamp_pos);
+        mat.color.rgb *= sharp_shadow_term;
+    } else if (SOFT_SHADOW) {
+        // Soft shadow 
+        float sharp_shadow_term = sharp_shadow(p, n, light_dir, lamp_pos);
+        if( sharp_shadow_term == 1.0) {
+            mat.color.rgb *= sharp_shadow_term;
+        } else {
+            mat.color.rgb *= soft_shadow(p, n, light_dir, lamp_pos); 
+        }   
+        
+    }
+
+
+    return mat.color.rgb;
+}
+
+vec3 sharp_reflection(vec3 object_point, vec3 reflect_dir) {
+    vec3 p, n;
+    material mat;
+    bool hit = intersect(object_point, reflect_dir, MAX_DIST, p, n, mat, false );
+    if(hit) {
+        return render_reflect(object_point, reflect_dir);
+    }
+    return vec3(0.0);
 }
 
 void main()
