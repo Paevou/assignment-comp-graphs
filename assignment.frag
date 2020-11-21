@@ -43,10 +43,11 @@ precision mediump float;
 
 
 // Defines for functionalities that cannot be on at the same time
-#define SHARP_SHADOW true
+#define SHARP_SHADOW false
 #define SOFT_SHADOW true
 
-#define SHARP_REFLECTION true
+#define SHARP_REFLECTION false
+#define GLOSSY_REFLECTION true
 
 
 
@@ -107,12 +108,13 @@ const vec3 lamp_pos = vec3(0.0, 2.1, 3.0);
 
 float sharp_shadow(vec3 object_point, vec3 normal, vec3 light_dir, vec3 light_point);
 float soft_shadow(vec3 object_point,  vec3 normal, vec3 light_dir, vec3 light_point);
-vec3 getConeSample(vec3 direction, float coneAngle, vec3 perpendicular, in vec2 in_seed, out vec2 out_seed);
-float rand(vec2 seed);
-mat3 angleAxis3x3(float angle, vec3 axis);
+vec3 getConeSample(vec3 direction, float coneAngle, vec3 perpendicular, in vec2 in_seed, out vec2 out_seed, float dist);
+float rand(in vec2 in_seed, out vec2 out_seed);
+mat4 rotationMatrix(vec3 axis, float angle);
 
 vec3 render_reflect(vec3 o, vec3 v);
 vec3 sharp_reflection(vec3 object_point, vec3 reflect_dir);
+
 
 struct material
 {
@@ -121,6 +123,7 @@ struct material
     // You can add your own material features here!
     float reflection_term;
 };
+vec3 glossy_reflection(vec3 object_point, vec3 reflect_dir, material o_mat);
 
 // Good resource for finding more building blocks for distance functions:
 // https://www.iquilezles.org/www/articles/distfunctions/distfunctions.htm
@@ -439,16 +442,22 @@ vec3 render(vec3 o, vec3 v)
     } else if (SOFT_SHADOW) {
         // Soft shadow 
         float sharp_shadow_term = sharp_shadow(p, n, light_dir, lamp_pos);
-        if( sharp_shadow_term == 1.0) {
-            mat.color.rgb *= sharp_shadow_term;
-        } else {
-            mat.color.rgb *= soft_shadow(p, n, light_dir, lamp_pos); 
-        }    
+        // if( sharp_shadow_term == 1.0) {
+        //     mat.color.rgb *= sharp_shadow_term;
+        // } else {
+        //     mat.color.rgb *= soft_shadow(p, n, light_dir, lamp_pos); 
+        // } 
+        mat.color.rgb *= soft_shadow(p, n, light_dir, lamp_pos);   
         
     }
     
     vec3 reflect_dir = reflect(v, n);
-    vec3 reflect_color = sharp_reflection(p,reflect_dir);
+    vec3 reflect_color = vec3(0.0);
+    if(SHARP_REFLECTION ) {
+        reflect_color = sharp_reflection(p, reflect_dir);
+    } else if (GLOSSY_REFLECTION) {
+        reflect_color = glossy_reflection(p, reflect_dir, mat);
+    }
     mat.color.rgb += reflect_color * mat.reflection_term;
 
     return mat.color.rgb;
@@ -477,12 +486,11 @@ float soft_shadow(vec3 object_point, vec3 normal, vec3 light_dir, vec3 light_poi
     //https://medium.com/@alexander.wester/ray-tracing-soft-shadows-in-real-time-a53b836d123b
     
     vec3 perpendicular = cross(light_dir, vec3(0.0,1.0,0.0));
-
     if(perpendicular.x == 0.0
         && perpendicular.y == 0.0
         && perpendicular.z == 0.0) {
         perpendicular = vec3(1.0,0.0,0.0);
-    }
+    } 
 
     // Vector to the edge of the light bulb
     vec3 vec_light_edge = normalize((light_point + perpendicular * light_bulb_radius) - object_point);
@@ -500,25 +508,90 @@ float soft_shadow(vec3 object_point, vec3 normal, vec3 light_dir, vec3 light_poi
         float dist = sqrt( pow(object_point.x - light_point.x,2.0) 
         + pow(object_point.y - light_point.y,2.0) 
         + pow(object_point.z - light_point.z,2.0));
-        
-        int seed = 10;
-        //vec3 t = getConeSample(seed, -light_dir, cone_angle);         
-        vec3 t = getConeSample(light_dir, cone_angle, perpendicular, in_seed, out_seed);
+
+        //vec3 t = getConeSample(seed, -light_dir, cone_angle); 
+        vec3 t = getConeSample(light_dir, cone_angle, perpendicular, in_seed, out_seed, dist);
         in_seed = out_seed;
         vec3 ray_dir = light_dir * dist + t;
+        ray_dir = t;
+        //ray_dir = vec3(1.0,0.0,0.0);
 
         bool hit = intersect(object_point, ray_dir, dist, p, n, mat, false);
         if(mat == light_material(vec3(0.0))) {
             num_of_hits += 1;
         }        
-    }     
+    }    
+    
     return float(num_of_hits)/float(num_of_rays);
 }
 
-vec3 getConeSample(vec3 direction, float coneAngle, vec3 perpendicular, in vec2 in_seed, out vec2 out_seed) {
+vec3 getConeSample(vec3 direction, float coneAngle, vec3 perpendicular, in vec2 in_seed, out vec2 out_seed, float dist) {
     // Source for the base for random direction vector to a circle plane
+    // https://stackoverflow.com/questions/39404576/cone-from-direction-vector
     // https://medium.com/@alexander.wester/ray-tracing-soft-shadows-in-real-time-a53b836d123b
-    float cosAngle = cos(coneAngle);
+    
+    float r = light_bulb_radius * sin(rand(in_seed, out_seed));
+    float angle_around_axis = acos(rand(in_seed, out_seed));
+    vec4 v = normalize(vec4(perpendicular, 1.0));
+    mat4 rot_mat = rotationMatrix(direction, angle_around_axis);
+    v = rot_mat * v * r;
+    if(length(v) > light_bulb_radius ) {
+        return direction;
+    }
+    vec3 ret = dist * direction + v.xyz;
+    ret = normalize(ret);
+    if(acos(dot(v.xyz, direction)/(length(v.xyz)*length(direction))) <= coneAngle) {
+         return direction;
+    }
+    return ret;
+    //direction = vec3(0.0,1.0,0.0);
+    //coneAngle = PI/2.0;
+    // float cosAngle = cos(coneAngle);
+    // vec3 q = cross(direction, perpendicular);
+    // float rotation = tan(coneAngle);
+    // float theta = PI * sin(rand(in_seed, out_seed));   
+    // float r2 = rotation * sqrt(sin(abs(rand(in_seed, out_seed)))) ;
+    // vec3 v = r2 * (perpendicular * cos(theta) + q * sin(theta));
+    // v = normalize(v); 
+    //return direction;
+    // if(acos(dot(v.xyz, direction)/(length(v.xyz)*length(direction))) <= coneAngle) {
+    //      return direction;
+    // }
+    // return v;
+    // coneAngle = 0.0;
+    // direction = vec3(0.0,1.0,0.0);
+    //float cosAngle = cos(coneAngle);
+
+    // Generate points on the spherical cap around the north pole [1].
+    // [1] See https://math.stackexchange.com/a/205589/81266
+    // float z = rand(in_seed, out_seed) * (1.0 - cosAngle) + cosAngle;
+    // float phi = rand(in_seed, out_seed) * 2.0 * PI;
+    // // float z = (1.0 - cosAngle) + cosAngle;
+    // // float phi = 2.0 * PI;
+
+    // float x = sqrt(1.0 - z * z) * cos(phi);
+    // float y = sqrt(1.0 - z * z) * sin(phi);
+    // // x = lamp_pos.x;
+    // // y = lamp_pos.y;
+    // // z = lamp_pos.z;
+    // vec3 north = vec3(0.0, 0.0, 1.0);
+
+    // // Find the rotation axis `u` and rotation angle `rot` [1]
+    // vec3 axis = normalize(cross(north, normalize(direction)));
+    // float angle = acos(dot(normalize(direction), north));
+
+    // // Convert rotation axis and angle to 3x3 rotation matrix [2]
+    // mat4 R = rotationMatrix(axis, angle);
+    // vec4 ret = vec4(0.0);
+    // vec3 v = vec3(x,y,z);
+    // ret = R * vec4(v.xyz,1.0);
+    // // ret.x = R[0].x * v.x + R[1].x * v.y + R[2].x * v.z;
+    // // ret.y = R[0].y * v.x + R[1].y * v.y + R[2].y * v.z;
+    // // ret.z = R[0].z * v.x + R[1].z * v.y + R[2].z * v.z;
+    // if(acos(dot(ret.xyz, direction)/(length(ret.xyz)*length(direction))) <= cosAngle) {
+    //     return direction;
+    // }
+    // return ret.xyz;
 
     // float z = rand(vec2(u_time, u_time*2.0)) * (1.0 - cosAngle) + cosAngle;
     // float phi = rand(vec2(u_time*2.0, u_time*3.0)) * 2.0 * PI;
@@ -533,51 +606,50 @@ vec3 getConeSample(vec3 direction, float coneAngle, vec3 perpendicular, in vec2 
     // float angle = acos(dot(normalize(direction), north));    
 
     // Rotation around the direction to the light source center
-    float rot_angle = sin(rand(in_seed))*2.0*PI;
-    float r = sin(rand(in_seed)) ;
-    out_seed = vec2(r, 2.0*r);
-    mat3 R = angleAxis3x3(rot_angle, direction);
-    perpendicular *= r;
+
+    // float rot_angle = sin(rand(in_seed, out_seed))*2.0*PI;
+    // float r = sin(rand(in_seed, out_seed)) ;
+    // out_seed = vec2(r, 2.0*r);
+    // mat3 R = angleAxis3x3(rot_angle, direction);
+    // perpendicular *= r;
+
+
     //perpendicular = perpendicular * 0.1;
 
-    vec3 ret = vec3(0.0);
+    //vec3 ret = vec3(0.0);
     // vec3 v = vec3(x,y,z);
     // perpendicular = direction;
-    ret.x = R[0].x * perpendicular.x + R[1].x * perpendicular.y + R[2].x * perpendicular.z;
-    ret.y = R[0].y * perpendicular.x + R[1].y * perpendicular.y + R[2].y * perpendicular.z;
-    ret.z = R[0].z * perpendicular.x + R[1].z * perpendicular.y + R[2].z * perpendicular.z;
+    // ret.x = R[0].x * perpendicular.x + R[1].x * perpendicular.y + R[2].x * perpendicular.z;
+    // ret.y = R[0].y * perpendicular.x + R[1].y * perpendicular.y + R[2].y * perpendicular.z;
+    // ret.z = R[0].z * perpendicular.x + R[1].z * perpendicular.y + R[2].z * perpendicular.z;
     
     // ret.x = R[0].x * v.x + R[1].x * v.y + R[2].x * v.z;
     // ret.y = R[0].y * v.x + R[1].y * v.y + R[2].y * v.z;
     // ret.z = R[0].z * v.x + R[1].z * v.y + R[2].z * v.z;
     // return direction;
-    return ret;
+    //return v;
 }
 
-float rand(vec2 seed){
+float rand(in vec2 in_seed, out vec2 out_seed){
     // 'Random' function 
-    return fract(sin(dot(seed.xy,
+    out_seed = in_seed * 2.0;
+    return fract(sin(dot(in_seed.xy,
                          vec2(12.9898,78.233)))*
         43758.5453123);
 }
 
-mat3 angleAxis3x3(float angle, vec3 axis) {
-    // Rotation matrix 
-    // Source https://gist.github.com/Piratkopia13/46c5dda51ed59cfe69b242deb0cf40ce
-    float c, s;
-    c = cos(angle);
-    s = sin(angle);
-
-    float t = 1.0 - c;
-    float x = axis.x;
-    float y = axis.y;
-    float z = axis.z;
-
-    return mat3(
-        t * x * x + c,      t * x * y - s * z,  t * x * z + s * y,
-        t * x * y + s * z,  t * y * y + c,      t * y * z - s * x,
-        t * x * z - s * y,  t * y * z + s * x,  t * z * z + c
-    );
+mat4 rotationMatrix(vec3 axis, float angle)
+{
+    // Source: http://www.neilmendoza.com/glsl-rotation-about-an-arbitrary-axis/
+    axis = normalize(axis);
+    float s = sin(angle);
+    float c = cos(angle);
+    float oc = 1.0 - c;
+    
+    return mat4(oc * axis.x * axis.x + c,           oc * axis.x * axis.y - axis.z * s,  oc * axis.z * axis.x + axis.y * s,  0.0,
+                oc * axis.x * axis.y + axis.z * s,  oc * axis.y * axis.y + c,           oc * axis.y * axis.z - axis.x * s,  0.0,
+                oc * axis.z * axis.x - axis.y * s,  oc * axis.y * axis.z + axis.x * s,  oc * axis.z * axis.z + c,           0.0,
+                0.0,                                0.0,                                0.0,                                1.0);
 }
 
 vec3 render_reflect(vec3 o, vec3 v)
@@ -630,6 +702,38 @@ vec3 sharp_reflection(vec3 object_point, vec3 reflect_dir) {
     return vec3(0.0);
 }
 
+vec3 glossy_reflection(vec3 object_point, vec3 reflect_dir, material o_mat) {
+
+    vec3 perpendicular = cross(reflect_dir, vec3(0.0,1.0,0.0));
+
+    if(perpendicular.x == 0.0
+        && perpendicular.y == 0.0
+        && perpendicular.z == 0.0) {
+        perpendicular = vec3(1.0,0.0,0.0);
+    }
+    vec2 in_seed = gl_FragCoord.xy/u_resolution.xy;
+    vec2 out_seed;
+
+    vec3 p, n;
+    material mat;
+    const int num_of_rays = 1;
+    int num_of_hits = 0;
+    float angle = cos(PI/2.0 * o_mat.reflection_term);
+    vec3 color = vec3(0.0);
+    for(int i = 0 ; i < num_of_rays; i++) {
+        //reflect_dir = getConeSample(reflect_dir,angle, perpendicular, in_seed, out_seed);
+        bool hit = intersect(object_point, reflect_dir, MAX_DIST, p, n, mat, false );
+        if(hit) {
+            num_of_hits += 1;
+            color += render_reflect(object_point, reflect_dir)*(mat.reflection_term+1.5);
+        }
+    } 
+    if(num_of_hits == 0 ) {
+        return vec3(1.0);
+    }
+    return color/float(num_of_hits);
+}
+
 void main()
 {    
     // This is the position of the pixel in normalized device coordinates.
@@ -662,7 +766,7 @@ void main()
     // v = rot_y(v, norm_mouse_x);
     // v = rot_x(v, -norm_mouse_y);
     // o = vec3(1.0*sin(u_time), 1.0*cos(u_time),1.0*sin(u_time));
-    //v = rot_z(v, u_mouse.y/u_resolution.x);
+    // v = rot_z(v, u_mouse.y/u_resolution.x);
     
     gl_FragColor = vec4(render(o, v), 1.0);
 }
