@@ -49,6 +49,8 @@ precision mediump float;
 #define SHARP_REFLECTION false
 #define GLOSSY_REFLECTION false
 
+#define REFRACTIONS true
+
 
 
 #define PI 3.14159265359
@@ -105,6 +107,7 @@ const float SHININESS = 0.2;
 
 const float light_bulb_radius = 0.5;
 const vec3 lamp_pos = vec3(0.0, 2.1, 3.0);
+const float air_refraction_term = 1.0;
 
 float sharp_shadow(vec3 object_point, vec3 normal, vec3 light_dir, vec3 light_point);
 float soft_shadow(vec3 object_point,  vec3 normal, vec3 light_dir, vec3 light_point);
@@ -115,8 +118,8 @@ vec3 getConeSampleReflection(vec3 direction, float coneAngle, vec3 perpendicular
 
 
 vec3 render_reflect(vec3 o, vec3 v);
+vec3 render_refraction(vec3 o, vec3 v);
 vec3 sharp_reflection(vec3 object_point, vec3 reflect_dir);
-
 
 struct material
 {
@@ -124,8 +127,12 @@ struct material
     vec4 color;
     // You can add your own material features here!
     float reflection_term;
+    float refraction_term;
+    float transparency_term;
 };
 vec3 glossy_reflection(vec3 object_point, vec3 reflect_dir, material o_mat);
+vec3 refraction(vec3 o, vec3 v, vec3 n, material o_mat);
+vec3 refraction_vector(vec3 n, vec3 v, float n1, float n2);
 
 // Good resource for finding more building blocks for distance functions:
 // https://www.iquilezles.org/www/articles/distfunctions/distfunctions.htm
@@ -219,7 +226,9 @@ float blob_distance(vec3 p)
 material blob_material(vec3 p)
 {
     material mat;
-    mat.reflection_term = 0.01;
+    mat.reflection_term = 0.0;
+    mat.refraction_term = 0.0;
+    mat.transparency_term = 0.5;
     mat.color = vec4(1.0, 0.5, 0.3, 0.0);
     return mat;
 }
@@ -233,6 +242,8 @@ material sphere_material(vec3 p)
 {
     material mat;
     mat.reflection_term = 0.2;
+    mat.refraction_term = 1.3;
+    mat.transparency_term = 1.0;
     mat.color = vec4(0.1, 0.2, 0.0, 1.0);
     return mat;
 }
@@ -249,6 +260,8 @@ material room_material(vec3 p)
 {
     material mat;
     mat.reflection_term = 0.1;
+    mat.refraction_term = 0.0;
+    mat.transparency_term = 0.0;
     mat.color = vec4(1.0, 1.0, 1.0, 1.0);
     if(p.x <= -2.98) mat.color.rgb = vec3(1.0, 0.0, 0.0);
     else if(p.x >= 2.98) mat.color.rgb = vec3(0.0, 1.0, 0.0);
@@ -265,6 +278,8 @@ material crate_material(vec3 p)
     material mat;
     mat.color = vec4(1.0, 1.0, 1.0, 1.0);
     mat.reflection_term = 0.7;
+    mat.refraction_term = 1.1;
+    mat.transparency_term = 1.0;
     vec3 q = rot_y(p-vec3(-1,-1,5), u_time) * 0.98;
     if(fract(q.x + floor(q.y*2.0) * 0.5 + floor(q.z*2.0) * 0.5) < 0.5)
     {
@@ -282,7 +297,24 @@ material light_material(vec3 p)
 {
     material mat;
     mat.reflection_term = 0.0;
+    mat.refraction_term = 0.0;
+    mat.transparency_term = 0.0;
     mat.color = vec4(0.851, 1.0, 0.0, 1.0);
+    return mat;
+}
+
+float test_distance(vec3 p)
+{
+    return length(p - vec3(1.5, -1.8, 4.0)) - 1.2;
+}
+
+material test_material(vec3 p)
+{
+    material mat;
+    mat.reflection_term = 0.0;
+    mat.refraction_term = 0.0;
+    mat.transparency_term = 0.0;
+    mat.color = vec4(0.3882, 0.4275, 0.1686, 1.0);
     return mat;
 }
 
@@ -331,6 +363,12 @@ float map(
     dist = light_distance(p);
     if(dist < min_dist) {
         mat = light_material(p);
+        min_dist = dist;
+    }
+
+    dist = test_distance(p);
+    if(dist < min_dist) {
+        mat = test_material(p);
         min_dist = dist;
     }
 
@@ -451,7 +489,17 @@ vec3 render(vec3 o, vec3 v)
     } else if (GLOSSY_REFLECTION) {
         reflect_color = glossy_reflection(p, reflect_dir, mat);
     }
+    vec3 refract_color = vec3(0.0);
+    if(REFRACTIONS) {
+        refract_color = refraction(o, v, n, mat);
+    }
+    
+    
     mat.color.rgb += reflect_color * mat.reflection_term;
+    if(mat.transparency_term != 0.0 && refract_color != vec3(0.0)) {
+        mat.color.rgb *= 1.0 - mat.transparency_term;
+        mat.color.rgb += refract_color;
+    }
 
     return mat.color.rgb;
 }
@@ -600,6 +648,49 @@ vec3 render_reflect(vec3 o, vec3 v)
     return mat.color.rgb;
 }
 
+vec3 render_refraction(vec3 o, vec3 v)
+{
+    // This lamp is positioned at the hole in the roof.
+
+    vec3 p, n;
+    material mat;
+
+    // Compute intersection point along the view ray.
+    intersect(o, v, MAX_DIST, p, n, mat, false);
+
+    // Add some lighting code here! 
+
+    // Phong lighting   
+    vec3 light_dir = normalize(lamp_pos - p);
+    v = normalize(v);
+    vec3 diffuse = DIFFUSE * DIFFUSE_INTENSITY * max(dot(light_dir, n), 0.0);
+    vec3 reflect_ld = 2.0 * dot(-light_dir, n) * n + light_dir;
+    vec3 specular = SPECULAR_INTENSITY * SPECULAR * pow(max(dot(reflect_ld, v), 0.0), SHININESS);
+
+    mat.color.rgb = AMBIENT_STRENGTH * mat.color.rgb + diffuse + specular;
+    // Come out of the surface
+    p += 0.01*n;
+    if( SHARP_SHADOW ) {
+        // Sharp shadow        
+        mat.color.rgb *= sharp_shadow(p, n, light_dir, lamp_pos);
+    } else if (SOFT_SHADOW) {
+        // Soft shadow  
+        mat.color.rgb *= soft_shadow(p, n, light_dir, lamp_pos);           
+    }
+    
+    vec3 reflect_dir = reflect(v, n);
+    vec3 reflect_color = vec3(0.0);
+    if(SHARP_REFLECTION ) {
+        reflect_color = sharp_reflection(p, reflect_dir);
+    } else if (GLOSSY_REFLECTION) {
+        reflect_color = glossy_reflection(p, reflect_dir, mat);
+    }
+
+    mat.color.rgb += reflect_color * mat.reflection_term;
+
+    return mat.color.rgb;
+}
+
 vec3 sharp_reflection(vec3 object_point, vec3 reflect_dir) {
     vec3 p, n;
     material mat;
@@ -640,6 +731,34 @@ vec3 glossy_reflection(vec3 object_point, vec3 reflect_dir, material o_mat) {
         return vec3(1.0);
     }
     return color/float(num_of_hits);
+}
+
+vec3 refraction(vec3 o, vec3 v, vec3 n, material o_mat) {
+    // Some source: https://graphics.stanford.edu/courses/cs148-10-summer/docs/2006--degreve--reflection_refraction.pdf
+    if(o_mat.refraction_term == 0.0) {
+        return vec3(0.0);
+    }
+    vec3 ref_v = refraction_vector(n, v, air_refraction_term, o_mat.refraction_term);
+    vec3 p;
+    o += 0.01 * -n;
+    material mat;
+    intersect(o, ref_v, MAX_DIST, p, n, mat, true);
+
+    ref_v = refraction_vector(n, v, o_mat.refraction_term, air_refraction_term);
+    p += 0.01*n;
+    vec3 color = render_refraction(p, ref_v);
+    return color ;
+}
+
+vec3 refraction_vector(vec3 n, vec3 v, float n1, float n2) {
+    float n12 = n1/n2;
+    float cosV = -dot(n, v);
+    float sinT2 = n12 * n12 * (1.0 - cosV * cosV);
+    if(sinT2 > 1.0) {
+        return vec3(0.0);
+    }
+    float cosT = sqrt(1.0 - sinT2);
+    return n12 * v + (n * cosV - cosT ) * n12;
 }
 
 void main()
