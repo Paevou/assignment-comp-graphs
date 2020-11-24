@@ -109,6 +109,8 @@ const float light_bulb_radius = 0.5;
 const vec3 lamp_pos = vec3(0.0, 2.1, 3.0);
 const float air_refraction_term = 1.0;
 
+float displace(vec3 p);
+
 float sharp_shadow(vec3 object_point, vec3 normal, vec3 light_dir, vec3 light_point);
 float soft_shadow(vec3 object_point,  vec3 normal, vec3 light_dir, vec3 light_point);
 vec3 getConeSampleShadow(vec3 direction, float coneAngle, vec3 perpendicular, in vec2 in_seed, out vec2 out_seed, float dist);
@@ -150,6 +152,41 @@ float box(vec3 p, vec3 b)
 {
     vec3 d = abs(p) - b;
     return min(max(d.x,max(d.y,d.z)),0.0) + length(max(d,0.0));
+}
+
+// Simple cylinder distance field
+float cylinder(vec3 p, vec3 r) {
+    // p is the place where the object is going to be and r is the dimensions
+    vec2 d = abs(vec2(length(p.xz),p.y)) - vec2(r.x,r.y);
+    return min(max(d.x,d.y),0.0) + length(max(d,0.0));
+}
+
+float fractal(vec3 p, vec3 r) {
+    float boundary = 50;
+    float len = 0;
+    vec2 z = vec2(0.0);
+    for(int i = 0; i < 100; i++ ) {
+        z = vec2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y ) + p.xy;
+        if( dot(z,z) > (boundary * boundary)) break;
+        len += 1.0;
+    }
+
+    if( len > 99 ) {
+        return 0.0;
+    }
+    float s_len = len - log2(log2(dot(z,z))) + 4.0;
+
+    float a_len = smoothstep( -0.1, 0.0, sin(0.5 * 6.2831 * u_time));
+    return len;
+
+    vec2 d = abs(vec2(length(p.xz),p.y)) - vec2(r.x,r.y);
+    float d2 = displace(p);
+    return min(max(d.x + d2, d.y + d2),d.x);
+    return min(max(d.x,d.y),0.0) + length(max(d,0.0));
+}
+
+float displace(vec3 p) {
+    return sin(20.0*p.x)*sin(20.0*p.y)*sin(20.0*p.z);
 }
 
 /* Rotates point around origin along the X axis.
@@ -235,7 +272,7 @@ material blob_material(vec3 p)
 
 float sphere_distance(vec3 p)
 {
-    return length(p - vec3(1.5, -1.8, 4.0)) - 1.2;
+    return length(p - vec3(1.5, -1.8, 2.0)) - 1.2;
 }
 
 material sphere_material(vec3 p)
@@ -244,7 +281,7 @@ material sphere_material(vec3 p)
     mat.reflection_term = 0.2;
     mat.refraction_term = 1.3;
     mat.transparency_term = 1.0;
-    mat.color = vec4(0.1, 0.2, 0.0, 1.0);
+    mat.color = vec4(0.1725, 0.4392, 0.1882, 1.0);
     return mat;
 }
 
@@ -279,7 +316,7 @@ material crate_material(vec3 p)
     mat.color = vec4(1.0, 1.0, 1.0, 1.0);
     mat.reflection_term = 0.7;
     mat.refraction_term = 1.1;
-    mat.transparency_term = 1.0;
+    mat.transparency_term = 0.0;
     vec3 q = rot_y(p-vec3(-1,-1,5), u_time) * 0.98;
     if(fract(q.x + floor(q.y*2.0) * 0.5 + floor(q.z*2.0) * 0.5) < 0.5)
     {
@@ -303,20 +340,32 @@ material light_material(vec3 p)
     return mat;
 }
 
-float test_distance(vec3 p)
-{
-    return length(p - vec3(1.5, -1.8, 4.0)) - 1.2;
+float cylinder_distance(vec3 p) {
+    return cylinder(p - vec3(1.5, -1.8, 5.0), vec3(1.0, 1.5, 1.0));
 }
 
-material test_material(vec3 p)
-{
+material cylinder_material(vec3 p ) {
     material mat;
-    mat.reflection_term = 0.0;
-    mat.refraction_term = 0.0;
+    mat.reflection_term = 0.2;
+    mat.refraction_term = 1.3;
     mat.transparency_term = 0.0;
-    mat.color = vec4(0.3882, 0.4275, 0.1686, 1.0);
+    mat.color = vec4(0.4, 0.8275, 0.4275, 1.0);
     return mat;
 }
+
+float fractal_distance(vec3 p) {
+    return fractal(p - vec3(-1.0, -2.0, 3.0), vec3(1.0, 1.5, 1.0));
+}
+
+material fractal_material(vec3 p ) {
+    material mat;
+    mat.reflection_term = 0.2;
+    mat.refraction_term = 1.3;
+    mat.transparency_term = 0.0;
+    mat.color = vec4(0.4, 0.8275, 0.4275, 1.0);
+    return mat;
+}
+
 
 /* The distance function collecting all others.
  *
@@ -334,11 +383,11 @@ float map(
     float min_dist = MAX_DIST*2.0;
     float dist = 0.0;
 
-    dist = blob_distance(p);
-    if(dist < min_dist) {
-        mat = blob_material(p);
-        min_dist = dist;
-    }
+    // dist = blob_distance(p);
+    // if(dist < min_dist) {
+    //     mat = blob_material(p);
+    //     min_dist = dist;
+    // }
 
     dist = room_distance(p);
     if(dist < min_dist) {
@@ -366,12 +415,18 @@ float map(
         min_dist = dist;
     }
 
-    dist = test_distance(p);
+    dist = cylinder_distance(p);
     if(dist < min_dist) {
-        mat = test_material(p);
+        mat = cylinder_material(p);
         min_dist = dist;
     }
 
+    dist = fractal_distance(p);
+    if(dist < min_dist) {
+        mat = fractal_material(p);
+        min_dist = dist;
+    }
+    
     return min_dist;
 }
 
@@ -490,15 +545,16 @@ vec3 render(vec3 o, vec3 v)
         reflect_color = glossy_reflection(p, reflect_dir, mat);
     }
     vec3 refract_color = vec3(0.0);
+    p -= 0.01*n;
     if(REFRACTIONS) {
-        refract_color = refraction(o, v, n, mat);
+        refract_color = refraction(p, v, n, mat);
     }
     
     
     mat.color.rgb += reflect_color * mat.reflection_term;
     if(mat.transparency_term != 0.0 && refract_color != vec3(0.0)) {
         mat.color.rgb *= 1.0 - mat.transparency_term;
-        mat.color.rgb += refract_color;
+        mat.color.rgb += refract_color * mat.transparency_term;
     }
 
     return mat.color.rgb;
@@ -738,16 +794,19 @@ vec3 refraction(vec3 o, vec3 v, vec3 n, material o_mat) {
     if(o_mat.refraction_term == 0.0) {
         return vec3(0.0);
     }
-    vec3 ref_v = refraction_vector(n, v, air_refraction_term, o_mat.refraction_term);
+    //vec3 ref_v = refraction_vector(n, v, air_refraction_term,
+    //o_mat.refraction_term);
+    vec3 ref_v = refract(v, n, air_refraction_term/o_mat.refraction_term);
     vec3 p;
     o += 0.01 * -n;
     material mat;
     intersect(o, ref_v, MAX_DIST, p, n, mat, true);
 
-    ref_v = refraction_vector(n, v, o_mat.refraction_term, air_refraction_term);
+    //ref_v = refraction_vector(n, v, o_mat.refraction_term, air_refraction_term);
+    ref_v = refract(v, n, o_mat.refraction_term/air_refraction_term);
     p += 0.01*n;
-    vec3 color = render_refraction(p, ref_v);
-    return color ;
+    vec3 color = render_refraction(p, -ref_v);
+    return color;
 }
 
 vec3 refraction_vector(vec3 n, vec3 v, float n1, float n2) {
@@ -755,10 +814,11 @@ vec3 refraction_vector(vec3 n, vec3 v, float n1, float n2) {
     float cosV = -dot(n, v);
     float sinT2 = n12 * n12 * (1.0 - cosV * cosV);
     if(sinT2 > 1.0) {
-        return vec3(0.0);
+        //TODO: Some illegal value should be returned
+        //return vec3(0.0);
     }
     float cosT = sqrt(1.0 - sinT2);
-    return n12 * v + (n * cosV - cosT ) * n12;
+    return n12 * v + (n12 * cosV - cosT ) * n;
 }
 
 void main()
