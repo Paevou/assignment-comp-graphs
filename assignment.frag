@@ -53,7 +53,7 @@ precision mediump float;
 
 #define REFRACTIONS true
 
-#define CELLULAR_TEXTURE true
+#define CELLULAR_TEXTURE false
 #define CLEAR_CELLULAR_TEXTURE false
 
 
@@ -177,9 +177,10 @@ float cylinder(vec3 p, vec3 r) {
 float fractal(vec3 p, vec3 r2) {
     // Mandelbulb fractal
     // https://en.wikipedia.org/wiki/Mandelbulb
-    float power_of_Mandelbulb = 10.0;
+    // Exponent between 3 - 15
+    float power_of_Mandelbulb = 3.0 + 4.0 * (sin(u_time/30.0) + 1.0);
     // Some factor, didn't really understand why this does what it does in other
-    // sources
+    // examples, but the Mandelbuld breaks without it
 	float dr = 1.0;
 	float radius = 0.0;
 	vec3 z = p;
@@ -192,7 +193,7 @@ float fractal(vec3 p, vec3 r2) {
         float theta = acos(z.z / radius);
 		dr =  pow( radius, power_of_Mandelbulb) * power_of_Mandelbulb * dr + 1.0;
 		
-		// Point is rotated and scaled
+		// Point needs to be rotated and scaled
 		theta = theta * power_of_Mandelbulb;
 		phi = phi * power_of_Mandelbulb;
 		
@@ -361,9 +362,7 @@ material light_material(vec3 p)
 }
 
 vec4 cylinder_texture(vec3 p) {
-    // if( sin(p.x * 4.0) <= sin(p.y * 4.0) && sin(p.x * 4.0) <= sin(p.z * 4.0)) {        
-    //             return vec4(0.102, 0.1255, 0.1255, 1.0);        
-    // }
+    // Source: https://thebookofshaders.com/12/
     float cell_nodes_x[11];
     float cell_nodes_y[11];
     float cell_nodes_z[11];
