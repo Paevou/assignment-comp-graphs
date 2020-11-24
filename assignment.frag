@@ -43,6 +43,8 @@ precision mediump float;
 
 
 // Defines for functionalities that cannot be on at the same time
+#define REQUIRED_MOVEMENT false
+
 #define SHARP_SHADOW false
 #define SOFT_SHADOW false
 
@@ -50,6 +52,9 @@ precision mediump float;
 #define GLOSSY_REFLECTION false
 
 #define REFRACTIONS true
+
+#define CELLULAR_TEXTURE true
+#define CLEAR_CELLULAR_TEXTURE false
 
 
 
@@ -91,8 +96,11 @@ uniform vec2 u_resolution;
 // Mouse coordinates
 uniform vec2 u_mouse;
 
+uniform sampler2D u_keyboard;
+
 // Time since startup, in seconds
 uniform float u_time;
+
 
 // Values are approximated with exercise 5 values
 // Ambient constant
@@ -109,6 +117,9 @@ const float light_bulb_radius = 0.5;
 const vec3 lamp_pos = vec3(0.0, 2.1, 3.0);
 const float air_refraction_term = 1.0;
 
+const vec3 cylinder_pos = vec3(3.5, -1.8, 3.0);
+
+
 float displace(vec3 p);
 
 float sharp_shadow(vec3 object_point, vec3 normal, vec3 light_dir, vec3 light_point);
@@ -123,6 +134,8 @@ vec3 render_reflect(vec3 o, vec3 v);
 vec3 render_refraction(vec3 o, vec3 v);
 vec3 sharp_reflection(vec3 object_point, vec3 reflect_dir);
 
+
+vec4 cylinder_texture(vec3 p);
 struct material
 {
     // The color of the surface
@@ -161,28 +174,34 @@ float cylinder(vec3 p, vec3 r) {
     return min(max(d.x,d.y),0.0) + length(max(d,0.0));
 }
 
-float fractal(vec3 p, vec3 r) {
-    float boundary = 50;
-    float len = 0;
-    vec2 z = vec2(0.0);
-    for(int i = 0; i < 100; i++ ) {
-        z = vec2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y ) + p.xy;
-        if( dot(z,z) > (boundary * boundary)) break;
-        len += 1.0;
-    }
+float fractal(vec3 p, vec3 r2) {
+    // Mandelbulb fractal
+    // https://en.wikipedia.org/wiki/Mandelbulb
+    float power_of_Mandelbulb = 10.0;
+    // Some factor, didn't really understand why this does what it does in other
+    // sources
+	float dr = 1.0;
+	float radius = 0.0;
+	vec3 z = p;
+	for (int i = 0; i < 64 ; i++) {
 
-    if( len > 99 ) {
-        return 0.0;
-    }
-    float s_len = len - log2(log2(dot(z,z))) + 4.0;
-
-    float a_len = smoothstep( -0.1, 0.0, sin(0.5 * 6.2831 * u_time));
-    return len;
-
-    vec2 d = abs(vec2(length(p.xz),p.y)) - vec2(r.x,r.y);
-    float d2 = displace(p);
-    return min(max(d.x + d2, d.y + d2),d.x);
-    return min(max(d.x,d.y),0.0) + length(max(d,0.0));
+		// In polar coordinate system        		
+		radius = length(z);
+		if (radius > 1.5) break;        		
+		float phi = atan(z.y, z.x);
+        float theta = acos(z.z / radius);
+		dr =  pow( radius, power_of_Mandelbulb) * power_of_Mandelbulb * dr + 1.0;
+		
+		// Point is rotated and scaled
+		theta = theta * power_of_Mandelbulb;
+		phi = phi * power_of_Mandelbulb;
+		
+		// Change back to normal coodinates
+		float term_r = pow( radius, power_of_Mandelbulb);
+		z = term_r * vec3(sin(theta) * cos(phi), sin(phi) * sin(theta), cos(theta));
+		z += p;
+	}
+	return 0.5 * log(radius) * radius / dr;
 }
 
 float displace(vec3 p) {
@@ -272,15 +291,15 @@ material blob_material(vec3 p)
 
 float sphere_distance(vec3 p)
 {
-    return length(p - vec3(1.5, -1.8, 2.0)) - 1.2;
+    return length(p - vec3(-2.5, -1.8, 3.0)) - 1.2;
 }
 
 material sphere_material(vec3 p)
 {
     material mat;
     mat.reflection_term = 0.2;
-    mat.refraction_term = 1.3;
-    mat.transparency_term = 1.0;
+    mat.refraction_term = 1.33;
+    mat.transparency_term = 0.5;
     mat.color = vec4(0.1725, 0.4392, 0.1882, 1.0);
     return mat;
 }
@@ -289,7 +308,7 @@ float room_distance(vec3 p)
 {
     return max(
         -box(p-vec3(0.0,3.0,3.0), vec3(0.5, 0.5, 0.5)),
-        -box(p-vec3(0.0,0.0,0.0), vec3(3.0, 3.0, 6.0))
+        -box(p-vec3(0.0,0.0,0.0), vec3(5.0, 3.0, 6.0))
     );
 }
 
@@ -320,7 +339,8 @@ material crate_material(vec3 p)
     vec3 q = rot_y(p-vec3(-1,-1,5), u_time) * 0.98;
     if(fract(q.x + floor(q.y*2.0) * 0.5 + floor(q.z*2.0) * 0.5) < 0.5)
     {
-        mat.color.rgb = vec3(0.0, 1.0, 1.0);
+        // mat.color.rgb = vec3(0.0, 1.0, 1.0);
+        mat.color = cylinder_texture(p);
     }
     return mat;
 }
@@ -340,8 +360,72 @@ material light_material(vec3 p)
     return mat;
 }
 
+vec4 cylinder_texture(vec3 p) {
+    // if( sin(p.x * 4.0) <= sin(p.y * 4.0) && sin(p.x * 4.0) <= sin(p.z * 4.0)) {        
+    //             return vec4(0.102, 0.1255, 0.1255, 1.0);        
+    // }
+    float cell_nodes_x[11];
+    float cell_nodes_y[11];
+    float cell_nodes_z[11];
+    float cell_dist[11];
+    float min_dist = 100.0;
+    float max_dist = 0.0;
+    vec2 seed = u_mouse.xy;
+    for(int i = 0; i < 5; i++ ) {        
+        //float ran = rand(seed, seed);
+        float ran = rand(seed, seed); 
+        if(ran < 0.5)  {
+            cell_nodes_x[i] = cylinder_pos.x + ran;
+            ran = rand(seed, seed);
+            cell_nodes_y[i] = cylinder_pos.y + ran;
+            ran = rand(seed, seed);
+            cell_nodes_z[i] = cylinder_pos.z + ran;
+        } else {
+            cell_nodes_x[i] = cylinder_pos.x - ran;
+            ran = rand(seed, seed);
+            cell_nodes_y[i] = cylinder_pos.y - ran;
+            ran = rand(seed, seed);
+            cell_nodes_z[i] = cylinder_pos.z - ran;
+        }
+        float dist = abs(length(p - vec3(cell_nodes_x[i], cell_nodes_y[i], cell_nodes_z[i])));
+        
+        cell_dist[i] = dist;                
+        min_dist = min(min_dist, dist);
+        max_dist = max(max_dist, dist);              
+    } 
+    float new_min_dist = 100.0;
+    float new_max_dist = 0.0;
+    for(int i = 0; i < 5; i++ ) {
+        cell_dist[i] = cell_dist[i] / max_dist; 
+        new_min_dist = min(new_min_dist, cell_dist[i]);
+        new_max_dist = max(new_max_dist, cell_dist[i]);
+    }    
+    if(CELLULAR_TEXTURE)
+        return vec4(vec3(new_min_dist), 1.0);
+    else if(CLEAR_CELLULAR_TEXTURE) {
+            if(new_min_dist < 0.3)  {
+            return vec4(0.0);
+        }  else if ( new_min_dist < 0.4) {
+            return vec4(0.1);
+        }  else if ( new_min_dist < 0.5) {
+            return vec4(0.2);
+        }  else if ( new_min_dist < 0.6) {
+            return vec4(0.3);
+        } else if(new_min_dist < 0.7)  {
+            return vec4(0.4);
+        }  else if ( new_min_dist < 0.9) {
+            return vec4(0.5);
+        }  else if ( new_min_dist < 0.9) {
+            return vec4(0.6);
+        }  else if ( new_min_dist < 1.0) {
+            return vec4(0.7);
+    } 
+    }
+
+}
+
 float cylinder_distance(vec3 p) {
-    return cylinder(p - vec3(1.5, -1.8, 5.0), vec3(1.0, 1.5, 1.0));
+    return cylinder(p - cylinder_pos, vec3(1.0, 1.0, 1.0));
 }
 
 material cylinder_material(vec3 p ) {
@@ -349,12 +433,12 @@ material cylinder_material(vec3 p ) {
     mat.reflection_term = 0.2;
     mat.refraction_term = 1.3;
     mat.transparency_term = 0.0;
-    mat.color = vec4(0.4, 0.8275, 0.4275, 1.0);
+    mat.color = cylinder_texture(p);
     return mat;
 }
 
 float fractal_distance(vec3 p) {
-    return fractal(p - vec3(-1.0, -2.0, 3.0), vec3(1.0, 1.5, 1.0));
+    return fractal(p - vec3(0, -2.0, 3.0), vec3(1.0, 1.5, 1.0));
 }
 
 material fractal_material(vec3 p ) {
@@ -845,15 +929,15 @@ void main()
     // vec3 camera_up = normalize(cross(o, vec3(0.0, 1.0, -1.0)));
     // vec3 camera_right = normalize(cross(camera_dir, camera_up));
     // camera_up = cross(camera_right, camera_dir);
-    
-    // TODO: Ask about wheter camera movement is in fragment shader or the
-    // vertex shader
-    // float norm_mouse_x = -1.0 + 2.0 * u_mouse.x / u_resolution.x;
-    // float norm_mouse_y = -1.0 + 2.0 * u_mouse.y / u_resolution.y;
-    // v = rot_y(v, norm_mouse_x);
-    // v = rot_x(v, -norm_mouse_y);
-    // o = vec3(1.0*sin(u_time), 1.0*cos(u_time),1.0*sin(u_time));
-    // v = rot_z(v, u_mouse.y/u_resolution.x);
+
+    if( REQUIRED_MOVEMENT ) {
+        float norm_mouse_x = -1.0 + 2.0 * u_mouse.x / u_resolution.x;
+        float norm_mouse_y = -1.0 + 2.0 * u_mouse.y / u_resolution.y;
+        v = rot_y(v, norm_mouse_x);
+        v = rot_x(v, -norm_mouse_y);
+        o = vec3(1.0*sin(u_time), 1.0*cos(u_time),1.0*sin(u_time));
+        v = rot_z(v, u_mouse.y/u_resolution.x);
+    } 
     
     gl_FragColor = vec4(render(o, v), 1.0);
 }
