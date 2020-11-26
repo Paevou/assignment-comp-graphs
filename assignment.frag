@@ -49,8 +49,12 @@ precision mediump float;
 #define REQUIRED_MOVEMENT false
 
 // Select only one shadow type (sharp takes precedence if both are on)
+// Sharp shadow doesn't change by light bulb radius (finds route to the center)
 #define SHARP_SHADOW true
+// Little pixelated, by changing number of rays and light_bulb_radius one can
+// see better the effect ( best seen on left behind the crate )
 #define SOFT_SHADOW false
+#define light_bulb_radius 0.5
 
 // Select only one reflection type (sharp takes precedence if both are on)
 // Materials have their reflection term (0 - no reflection, 1 - full reflection)
@@ -70,7 +74,7 @@ precision mediump float;
 
 // Only one cellular texture type (non-clear takes precedence if both are on)
 // Can be seen on the right on the cylinder 
-#define CELLULAR_TEXTURE true
+#define CELLULAR_TEXTURE false
 #define CLEAR_CELLULAR_TEXTURE false
 // Cellular texture seed changes with mouse movement to find better seeds
 // otherwise switches between two seeds
@@ -131,7 +135,7 @@ const float DIFFUSE_INTENSITY = 0.1;
 const float SPECULAR_INTENSITY = 0.2;
 const float SHININESS = 0.2;
 
-const float light_bulb_radius = 0.5;
+//const float light_bulb_radius = 0.5;
 const vec3 lamp_pos = vec3(0.0, 2.1, 3.0);
 const float air_refraction_term = 1.0;
 
@@ -388,12 +392,13 @@ vec4 cylinder_texture(vec3 p) {
     float cell_dist[11];
     float min_dist = 100.0;
     float max_dist = 0.0;    
-    // Changes texture seed with mouse movement   
+    // Changes texture seed with mouse movement 
+    vec2 seed = vec2(0.0, 0.0) ; 
     if( WITH_MOUSE ) {
-        vec2 seed = u_mouse.xy;
+        seed = u_mouse.xy;
     } else {
         // Switches between two seeds with time
-        vec2 seed = vec2(mod(u_time, 10.0), mod(u_time, 5.0));
+        seed = vec2(mod(u_time, 10.0), mod(u_time, 5.0));
         if(seed.x < 5.0 ) {
             seed = vec2(9.0, 11.0);
         } else {
@@ -448,7 +453,9 @@ vec4 cylinder_texture(vec3 p) {
             return vec4(0.6);
         }  else if ( new_min_dist < 1.0) {
             return vec4(0.7);
-    } 
+        } 
+    } else {
+        return vec4(0.0);
     }
 
 }
@@ -720,14 +727,14 @@ float soft_shadow(vec3 object_point, vec3 normal, vec3 light_dir, vec3 light_poi
     // Source which was used as a base for soft shadows
     //https://medium.com/@alexander.wester/ray-tracing-soft-shadows-in-real-time-a53b836d123b
     
-    vec3 perpendicular = cross(light_dir, vec3(0.0,1.0,0.0));
+    vec3 perpendicular = cross(-light_dir, vec3(0.0,1.0,0.0));
     if(perpendicular.x == 0.0
         && perpendicular.y == 0.0
         && perpendicular.z == 0.0) {
         perpendicular = vec3(1.0,0.0,0.0);
     } 
 
-    // Vector to the edge of the light bulb
+    // Vector to the edge of the light bulb (not used anymore)
     vec3 vec_light_edge = normalize((light_point + perpendicular * light_bulb_radius) - object_point);
     // * 2 so we get both halves of the circle plane
     float cone_angle = acos(dot(light_dir, vec_light_edge)) * 2.0;
@@ -771,7 +778,7 @@ vec3 getConeSampleShadow(vec3 direction, float coneAngle, vec3 perpendicular, in
     vec4 v = normalize(vec4(perpendicular, 1.0));
     mat4 rot_mat = rotationMatrix(direction, angle_around_axis);
     v = rot_mat * v * r;
-    vec3 ret = dist * direction + v.xyz;
+    vec3 ret = dist * direction + v.xyz * light_bulb_radius;
     ret = normalize(ret);
     return ret;
 }
