@@ -11,29 +11,29 @@
 //-------------------------------------------------------------------------------
 // example functionality          | X  | Example note: control this with var YYYY
 // Mandatory functionalities ----------------------------------------------------
-//   Perspective projection       |    | 
-//   Phong shading                |    | 
-//   Camera movement and rotation |    | 
-//   Sharp shadows                |    | 
+//   Perspective projection       | X  | Always active
+//   Phong shading                | X  | Always active
+//   Camera movement and rotation | X  | Control this with REQUIRED_MOVEMENT define
+//   Sharp shadows                | X  | Control this with SHARP_SHADOW define
 // Extra functionalities --------------------------------------------------------
 //   Tone mapping                 |    | 
 //   PBR shading                  |    | 
-//   Soft shadows                 |    | 
-//   Sharp reflections            |    | 
-//   Glossy reflections           |    | 
-//   Refractions                  |    | 
+//   Soft shadows                 | X  | Control this with SOFT_SHADOW define
+//   Sharp reflections            | X  | Control this with SHARP_REFLECTION define
+//   Glossy reflections           | X  | Control this with GLOSSY_REFLECTION define
+//   Refractions                  | X  | Control this with REFRACTIONS define
 //   Caustics                     |    | 
 //   SDF Ambient Occlusions       |    | 
-//   Texturing                    |    | 
+//   Texturing                    | X  | Control this with CELLULAR_TEXTURE and CLEAR_CELLULAR_TEXTURE defines
 //   Simple game                  |    | 
 //   Progressive path tracing     |    | 
 //   Basic post-processing        |    | 
 //   Advanced post-processing     |    | 
 //   Screen space reflections     |    | 
 //   Screen space AO              |    | 
-//   Simple own SDF               |    | 
-//   Advanced own SDF             |    | 
-//   Animated SDF                 |    | 
+//   Simple own SDF               | X  | Can be seen as the cylinder on right
+//   Advanced own SDF             | X  | Can be seen in the middle Mandelbulb
+//   Animated SDF                 | X  | Can be seen as the middle Mandelbulb morphing
 //   Other?                       |    | 
 
 
@@ -43,18 +43,38 @@ precision mediump float;
 
 
 // Defines for functionalities that cannot be on at the same time
+// Number of rays to use in soft shadows and glossy reflections 
+#define NUM_OF_RAYS 2
+
 #define REQUIRED_MOVEMENT false
 
-#define SHARP_SHADOW false
+// Select only one shadow type (sharp takes precedence if both are on)
+#define SHARP_SHADOW true
 #define SOFT_SHADOW false
 
-#define SHARP_REFLECTION false
+// Select only one reflection type (sharp takes precedence if both are on)
+// Materials have their reflection term (0 - no reflection, 1 - full reflection)
+#define SHARP_REFLECTION true
 #define GLOSSY_REFLECTION false
 
-#define REFRACTIONS true
+// Materials have their refraction and transparency terms (0 - no refraction, 1 - 2  some refraction)
+// (0 - no transparency, 1 - full transparency)
+// Material needs refraction term for it to be transparent. For example
+// (refraction 1.33 (water) and transparency 0.5 seen in sphere on the left)
+// Can be seen on the left on the sphere and the panel in the back
+// (There is some tweaking to be done to get shadows to change when
+// light passes through transparent material
+// which applies also to refractions and reflections where reflections are not influenced
+// by refractions )
+#define REFRACTIONS false
 
-#define CELLULAR_TEXTURE false
+// Only one cellular texture type (non-clear takes precedence if both are on)
+// Can be seen on the right on the cylinder 
+#define CELLULAR_TEXTURE true
 #define CLEAR_CELLULAR_TEXTURE false
+// Cellular texture seed changes with mouse movement to find better seeds
+// otherwise switches between two seeds
+#define WITH_MOUSE false
 
 
 
@@ -95,8 +115,6 @@ uniform vec2 u_resolution;
 
 // Mouse coordinates
 uniform vec2 u_mouse;
-
-uniform sampler2D u_keyboard;
 
 // Time since startup, in seconds
 uniform float u_time;
@@ -177,7 +195,7 @@ float cylinder(vec3 p, vec3 r) {
 float fractal(vec3 p, vec3 r2) {
     // Mandelbulb fractal
     // https://en.wikipedia.org/wiki/Mandelbulb
-    // Exponent between 3 - 15
+    // Exponent between 3 - 15 causes some morphing
     float power_of_Mandelbulb = 3.0 + 4.0 * (sin(u_time/30.0) + 1.0);
     // Some factor, didn't really understand why this does what it does in other
     // examples, but the Mandelbuld breaks without it
@@ -276,7 +294,7 @@ vec3 rot_z(vec3 p, float a)
 
 float blob_distance(vec3 p)
 {
-    vec3 q = p - vec3(-0.5, -2.2 + abs(sin(u_time*3.0)), 2.0);
+    vec3 q = p - vec3(1.5, -2.2 + abs(sin(u_time*3.0)), 4.0);
     return length(q) - 0.8 + sin(10.0*q.x)*sin(10.0*q.y)*cos(10.0*q.z)*0.07;
 }
 
@@ -285,7 +303,7 @@ material blob_material(vec3 p)
     material mat;
     mat.reflection_term = 0.0;
     mat.refraction_term = 0.0;
-    mat.transparency_term = 0.5;
+    mat.transparency_term = 0.0;
     mat.color = vec4(1.0, 0.5, 0.3, 0.0);
     return mat;
 }
@@ -298,12 +316,13 @@ float sphere_distance(vec3 p)
 material sphere_material(vec3 p)
 {
     material mat;
-    mat.reflection_term = 0.2;
+    mat.reflection_term = 1.0;
     mat.refraction_term = 1.33;
     mat.transparency_term = 0.5;
     mat.color = vec4(0.1725, 0.4392, 0.1882, 1.0);
     return mat;
 }
+
 
 float room_distance(vec3 p)
 {
@@ -340,8 +359,7 @@ material crate_material(vec3 p)
     vec3 q = rot_y(p-vec3(-1,-1,5), u_time) * 0.98;
     if(fract(q.x + floor(q.y*2.0) * 0.5 + floor(q.z*2.0) * 0.5) < 0.5)
     {
-        // mat.color.rgb = vec3(0.0, 1.0, 1.0);
-        mat.color = cylinder_texture(p);
+        mat.color.rgb = vec3(0.0, 1.0, 1.0);
     }
     return mat;
 }
@@ -361,6 +379,7 @@ material light_material(vec3 p)
     return mat;
 }
 
+// cellular texture
 vec4 cylinder_texture(vec3 p) {
     // Source: https://thebookofshaders.com/12/
     float cell_nodes_x[11];
@@ -368,10 +387,21 @@ vec4 cylinder_texture(vec3 p) {
     float cell_nodes_z[11];
     float cell_dist[11];
     float min_dist = 100.0;
-    float max_dist = 0.0;
-    vec2 seed = u_mouse.xy;
-    for(int i = 0; i < 5; i++ ) {        
-        //float ran = rand(seed, seed);
+    float max_dist = 0.0;    
+    // Changes texture seed with mouse movement   
+    if( WITH_MOUSE ) {
+        vec2 seed = u_mouse.xy;
+    } else {
+        // Switches between two seeds with time
+        vec2 seed = vec2(mod(u_time, 10.0), mod(u_time, 5.0));
+        if(seed.x < 5.0 ) {
+            seed = vec2(9.0, 11.0);
+        } else {
+            seed = vec2(16.0, 2.0);
+        }
+    }  
+    
+    for(int i = 0; i < 5; i++ ) {      
         float ran = rand(seed, seed); 
         if(ran < 0.5)  {
             cell_nodes_x[i] = cylinder_pos.x + ran;
@@ -449,6 +479,21 @@ material fractal_material(vec3 p ) {
     return mat;
 }
 
+float panel_distance(vec3 p)
+{
+    return box(p-vec3(3,0,5.7), vec3(1, 2, 0.01));
+}
+
+material panel_material(vec3 p)
+{
+    material mat;
+    mat.reflection_term = 1.0;
+    mat.refraction_term = 1.1;
+    mat.transparency_term = 0.5;
+    mat.color = vec4(0.1725, 0.4392, 0.1882, 1.0);
+    return mat;
+}
+
 
 /* The distance function collecting all others.
  *
@@ -466,11 +511,11 @@ float map(
     float min_dist = MAX_DIST*2.0;
     float dist = 0.0;
 
-    // dist = blob_distance(p);
-    // if(dist < min_dist) {
-    //     mat = blob_material(p);
-    //     min_dist = dist;
-    // }
+    dist = blob_distance(p);
+    if(dist < min_dist) {
+        mat = blob_material(p);
+        min_dist = dist;
+    }
 
     dist = room_distance(p);
     if(dist < min_dist) {
@@ -507,6 +552,12 @@ float map(
     dist = fractal_distance(p);
     if(dist < min_dist) {
         mat = fractal_material(p);
+        min_dist = dist;
+    }
+
+    dist = panel_distance(p);
+    if(dist < min_dist) {
+        mat = panel_material(p);
         min_dist = dist;
     }
     
@@ -602,7 +653,7 @@ vec3 render(vec3 o, vec3 v)
 
     // Add some lighting code here! 
 
-    // Phong lighting   
+    // Phong shading   
     vec3 light_dir = normalize(lamp_pos - p);
     v = normalize(v);
     vec3 diffuse = DIFFUSE * DIFFUSE_INTENSITY * max(dot(light_dir, n), 0.0);
@@ -612,6 +663,7 @@ vec3 render(vec3 o, vec3 v)
     mat.color.rgb = AMBIENT_STRENGTH * mat.color.rgb + diffuse + specular;
     // Come out of the surface
     p += 0.01*n;
+
     if( SHARP_SHADOW ) {
         // Sharp shadow        
         mat.color.rgb *= sharp_shadow(p, n, light_dir, lamp_pos);
@@ -636,7 +688,9 @@ vec3 render(vec3 o, vec3 v)
     
     mat.color.rgb += reflect_color * mat.reflection_term;
     if(mat.transparency_term != 0.0 && refract_color != vec3(0.0)) {
+        // Makes transparent
         mat.color.rgb *= 1.0 - mat.transparency_term;
+        // Add refract color
         mat.color.rgb += refract_color * mat.transparency_term;
     }
 
@@ -661,6 +715,7 @@ float sharp_shadow(vec3 object_point, vec3 normal, vec3 light_dir, vec3 light_po
     }    
 }
 
+// Calculate soft shadow term
 float soft_shadow(vec3 object_point, vec3 normal, vec3 light_dir, vec3 light_point) {
     // Source which was used as a base for soft shadows
     //https://medium.com/@alexander.wester/ray-tracing-soft-shadows-in-real-time-a53b836d123b
@@ -677,12 +732,12 @@ float soft_shadow(vec3 object_point, vec3 normal, vec3 light_dir, vec3 light_poi
     // * 2 so we get both halves of the circle plane
     float cone_angle = acos(dot(light_dir, vec_light_edge)) * 2.0;
 
-    const int num_of_rays = 2;
+    // const int num_of_rays = 2;
     int num_of_hits = 0;
     object_point += 0.01*normal;    
     vec2 in_seed = gl_FragCoord.xy/u_resolution.xy;
     vec2 out_seed;
-    for(int i = 0; i < num_of_rays; i++ ) {
+    for(int i = 0; i < NUM_OF_RAYS; i++ ) {
         vec3 p, n;
         material mat;
         float dist = sqrt( pow(object_point.x - light_point.x,2.0) 
@@ -702,9 +757,10 @@ float soft_shadow(vec3 object_point, vec3 normal, vec3 light_dir, vec3 light_poi
         }        
     }    
     
-    return float(num_of_hits)/float(num_of_rays);
+    return float(num_of_hits)/float(NUM_OF_RAYS);
 }
 
+// Calculate sample vector from a cone for shadow
 vec3 getConeSampleShadow(vec3 direction, float coneAngle, vec3 perpendicular, in vec2 in_seed, out vec2 out_seed, float dist) {
     
     float r = light_bulb_radius * sin(rand(in_seed, out_seed));
@@ -720,6 +776,7 @@ vec3 getConeSampleShadow(vec3 direction, float coneAngle, vec3 perpendicular, in
     return ret;
 }
 
+// Calculate sample vector from a cone for reflection
 vec3 getConeSampleReflection(vec3 direction, float coneAngle, vec3 perpendicular, in vec2 in_seed, out vec2 out_seed, float dist) {
     float r = 1.0 * sin(rand(in_seed, out_seed)) * sin(coneAngle);
     if(r == 0.0 ) {
@@ -734,14 +791,15 @@ vec3 getConeSampleReflection(vec3 direction, float coneAngle, vec3 perpendicular
     return ret;
 }
 
-float rand(in vec2 in_seed, out vec2 out_seed){
-    // 'Random' function 
+// 'Random' function 
+float rand(in vec2 in_seed, out vec2 out_seed){    
     out_seed = in_seed * 2.0;
     return fract(sin(dot(in_seed.xy,
                          vec2(12.9898,78.233)))*
         43758.5453123);
 }
 
+// Rotation matrix which rotates around the axis a given angle
 mat4 rotationMatrix(vec3 axis, float angle)
 {
     // Source: http://www.neilmendoza.com/glsl-rotation-about-an-arbitrary-axis/
@@ -756,6 +814,8 @@ mat4 rotationMatrix(vec3 axis, float angle)
                 0.0,                                0.0,                                0.0,                                1.0);
 }
 
+// Render reflect because no recursion? (could have used render if some functionalities would be moved
+// to main)
 vec3 render_reflect(vec3 o, vec3 v)
 {
     vec3 p, n;
@@ -787,6 +847,7 @@ vec3 render_reflect(vec3 o, vec3 v)
     return mat.color.rgb;
 }
 
+// Render refraction
 vec3 render_refraction(vec3 o, vec3 v)
 {
     // This lamp is positioned at the hole in the roof.
@@ -830,16 +891,18 @@ vec3 render_refraction(vec3 o, vec3 v)
     return mat.color.rgb;
 }
 
+// Calculate sharp reflection color
 vec3 sharp_reflection(vec3 object_point, vec3 reflect_dir) {
     vec3 p, n;
     material mat;
     bool hit = intersect(object_point, reflect_dir, MAX_DIST, p, n, mat, false );
     if(hit) {
-        return render_reflect(object_point, reflect_dir);
+        return render_reflect(object_point, reflect_dir) * mat.reflection_term;
     }
     return vec3(0.0);
 }
 
+// Calculate glossy reflection color
 vec3 glossy_reflection(vec3 object_point, vec3 reflect_dir, material o_mat) {
 
     vec3 perpendicular = cross(reflect_dir, vec3(0.0,1.0,0.0));
@@ -854,16 +917,16 @@ vec3 glossy_reflection(vec3 object_point, vec3 reflect_dir, material o_mat) {
 
     vec3 p, n;
     material mat;
-    const int num_of_rays = 2;
+    // const int num_of_rays = 2;
     int num_of_hits = 0;
     float angle = PI/16.0 * o_mat.reflection_term;
     vec3 color = vec3(0.0);
-    for(int i = 0 ; i < num_of_rays; i++) {
+    for(int i = 0 ; i < NUM_OF_RAYS; i++) {
         reflect_dir = getConeSampleReflection(reflect_dir,angle, perpendicular, in_seed, out_seed, 1.0);
         bool hit = intersect(object_point, reflect_dir, MAX_DIST, p, n, mat, false );
         if(hit) {
             num_of_hits += 1;
-            color += render_reflect(object_point, reflect_dir)*(mat.reflection_term+1.5);
+            color += render_reflect(object_point, reflect_dir)*(mat.reflection_term);
         }
     } 
     if(num_of_hits == 0 ) {
@@ -872,6 +935,7 @@ vec3 glossy_reflection(vec3 object_point, vec3 reflect_dir, material o_mat) {
     return color/float(num_of_hits);
 }
 
+// Calculate refraction color
 vec3 refraction(vec3 o, vec3 v, vec3 n, material o_mat) {
     // Some source: https://graphics.stanford.edu/courses/cs148-10-summer/docs/2006--degreve--reflection_refraction.pdf
     if(o_mat.refraction_term == 0.0) {
@@ -881,7 +945,7 @@ vec3 refraction(vec3 o, vec3 v, vec3 n, material o_mat) {
     //o_mat.refraction_term);
     vec3 ref_v = refract(v, n, air_refraction_term/o_mat.refraction_term);
     vec3 p;
-    o += 0.01 * -n;
+    o += 0.01 * n;
     material mat;
     intersect(o, ref_v, MAX_DIST, p, n, mat, true);
 
@@ -892,12 +956,12 @@ vec3 refraction(vec3 o, vec3 v, vec3 n, material o_mat) {
     return color;
 }
 
+// Calculate refraction vector (not used atm)
 vec3 refraction_vector(vec3 n, vec3 v, float n1, float n2) {
     float n12 = n1/n2;
     float cosV = -dot(n, v);
     float sinT2 = n12 * n12 * (1.0 - cosV * cosV);
     if(sinT2 > 1.0) {
-        //TODO: Some illegal value should be returned
         //return vec3(0.0);
     }
     float cosT = sqrt(1.0 - sinT2);
@@ -912,30 +976,21 @@ void main()
     float aspect = u_resolution.x/u_resolution.y;
 
     // Modify these two to create perspective projection!
-    //TODO: Why do parts of the blod dissappear
     // Origin of the view ray       
-    //vec3 o = vec3(2.96*vec2(uv.x * aspect, uv.y), -2.0);
     vec3 o = vec3(0,0,-0.8);
     // Direction of the view ray
-    //vec3 v = vec3(0,0,1);
     vec3 v = vec3(uv.x, uv.y, 0) - o;
 
     // Camera movement
-    // vec3 camera_pos = o;
-    // TODO: Possibly have to change to +o, as then camera points towards
-    // positive z-axis
-    // vec3 camera_dir = normalize(-o);
-    // vec3 camera_up = normalize(cross(o, vec3(0.0, 1.0, -1.0)));
-    // vec3 camera_right = normalize(cross(camera_dir, camera_up));
-    // camera_up = cross(camera_right, camera_dir);
-
     if( REQUIRED_MOVEMENT ) {
         float norm_mouse_x = -1.0 + 2.0 * u_mouse.x / u_resolution.x;
         float norm_mouse_y = -1.0 + 2.0 * u_mouse.y / u_resolution.y;
+        // Mouse factor
         v = rot_y(v, norm_mouse_x);
         v = rot_x(v, -norm_mouse_y);
-        o = vec3(1.0*sin(u_time), 1.0*cos(u_time),1.0*sin(u_time));
         v = rot_z(v, u_mouse.y/u_resolution.x);
+        // Time factor
+        o = vec3(1.0*sin(u_time), 0.0,1.0*cos(u_time));
     } 
     
     gl_FragColor = vec4(render(o, v), 1.0);
